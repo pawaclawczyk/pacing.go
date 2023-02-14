@@ -1,0 +1,11 @@
+version: '3'
+
+tasks:
+  test:
+    desc: 'Run all tests'
+    cmds:
+      - go test -race ./...
+  fmt:
+    desc: 'Format codebase'
+    cmds:
+      - go fmt ./...
