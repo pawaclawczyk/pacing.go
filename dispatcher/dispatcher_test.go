@@ -7,12 +7,13 @@ import (
 	"time"
 )
 
+const Delay = time.Millisecond
+
 func TestNewDispatcher(t *testing.T) {
 	srv := RunServer()
 	defer srv.Shutdown()
 
 	dispatcher, err := NewDispatcher()
-
 	assert.Nil(t, err)
 	assert.NotNil(t, dispatcher)
 
@@ -20,6 +21,43 @@ func TestNewDispatcher(t *testing.T) {
 	assert.Nil(t, err)
 
 	dispatcher.Shutdown()
+}
+
+func TestWatchAnnouncements(t *testing.T) {
+	srv := RunServer()
+	defer srv.Shutdown()
+
+	dispatcher, err := NewDispatcher()
+	assert.Nil(t, err)
+
+	err = dispatcher.Run()
+	assert.Nil(t, err)
+	defer dispatcher.Shutdown()
+
+	nc, err := nats.Connect(nats.DefaultURL)
+	assert.Nil(t, err)
+
+	err = nc.Publish(DefaultAnnouncements, []byte("consumer-1"))
+	assert.Nil(t, err)
+
+	time.Sleep(Delay)
+
+	consumers := dispatcher.Consumers()
+	assert.Len(t, consumers, 1)
+	assert.Contains(t, consumers, "consumer-1")
+
+	err = nc.Publish(DefaultAnnouncements, []byte("consumer-2"))
+	assert.Nil(t, err)
+	err = nc.Publish(DefaultAnnouncements, []byte("consumer-3"))
+	assert.Nil(t, err)
+
+	time.Sleep(Delay)
+
+	consumers = dispatcher.Consumers()
+	assert.Len(t, consumers, 3)
+	assert.Contains(t, consumers, "consumer-1")
+	assert.Contains(t, consumers, "consumer-2")
+	assert.Contains(t, consumers, "consumer-3")
 }
 
 func TestConsumersWatcher(t *testing.T) {
@@ -40,7 +78,7 @@ func TestConsumersWatcher(t *testing.T) {
 	err = nc.Publish(DefaultAnnouncements, []byte("consumer-1"))
 	assert.Nil(t, err)
 
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(Delay)
 
 	assert.Len(t, dispatcher.Consumers(), 1)
 
@@ -49,14 +87,14 @@ func TestConsumersWatcher(t *testing.T) {
 	err = nc.Publish(DefaultAnnouncements, []byte("consumer-3"))
 	assert.Nil(t, err)
 
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(Delay)
 
 	assert.Len(t, dispatcher.Consumers(), 3)
 
 	err = nc.Publish(DefaultAnnouncements, []byte("consumer-2"))
 	assert.Nil(t, err)
 
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(Delay)
 
 	assert.Len(t, dispatcher.Consumers(), 3)
 

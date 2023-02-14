@@ -22,9 +22,9 @@ type Dispatcher struct {
 	consumers            map[string]time.Time
 	consumersTTL         time.Duration
 	consumersTTLCheck    time.Duration
-	consumersWatcherDone chan bool
 	consumersCleanerDone chan bool
 	consumersMutex       sync.Mutex
+	watcherSub           *nats.Subscription
 }
 
 func NewDispatcher() (*Dispatcher, error) {
@@ -36,7 +36,6 @@ func NewDispatcher() (*Dispatcher, error) {
 		consumers:            make(map[string]time.Time),
 		consumersTTL:         DefaultConsumersTTL,
 		consumersTTLCheck:    DefaultConsumersTTLCheck,
-		consumersWatcherDone: make(chan bool),
 		consumersCleanerDone: make(chan bool),
 		consumersMutex:       sync.Mutex{},
 	}, nil
@@ -51,7 +50,8 @@ func (d *Dispatcher) Run() error {
 	if !d.conn.IsConnected() {
 		return errors.New(fmt.Sprintf("Cannot connect, connection status is %s\n", d.conn.Status()))
 	}
-	if err = d.WatchAnnouncements(); err != nil {
+	d.watcherSub, err = d.conn.Subscribe(d.announcements, d.watchAnnouncements)
+	if err != nil {
 		return err
 	}
 	go d.DeleteUnseenConsumers()
@@ -59,35 +59,11 @@ func (d *Dispatcher) Run() error {
 	return nil
 }
 
-func (d *Dispatcher) WatchAnnouncements() error {
-	var err error
-	var msg *nats.Msg
-	var consumer string
-
-	sub, err := d.conn.SubscribeSync(d.announcements)
-	if err != nil {
-		return err
-	}
-	go func() {
-		for {
-			select {
-			case <-d.consumersWatcherDone:
-				return
-			default:
-				msg, err = sub.NextMsg(time.Millisecond)
-				if err != nil && err != nats.ErrTimeout {
-					panic(err)
-				}
-				if msg != nil {
-					consumer = string(msg.Data)
-					d.consumersMutex.Lock()
-					d.consumers[consumer] = time.Now()
-					d.consumersMutex.Unlock()
-				}
-			}
-		}
-	}()
-	return nil
+func (d *Dispatcher) watchAnnouncements(msg *nats.Msg) {
+	consumer := string(msg.Data)
+	d.consumersMutex.Lock()
+	defer d.consumersMutex.Unlock()
+	d.consumers[consumer] = time.Now()
 }
 
 func (d *Dispatcher) DeleteUnseenConsumers() {
@@ -138,7 +114,6 @@ func (d *Dispatcher) DispatchWorkload() {
 }
 
 func (d *Dispatcher) Shutdown() {
-	d.consumersWatcherDone <- true
 	d.consumersCleanerDone <- true
 	d.done <- true
 	d.conn.Close()
