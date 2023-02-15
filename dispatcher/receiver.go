@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-const DefaultAnnouncementPeriod = time.Second
-
 type WorkloadCallback func(w string)
 
 type Receiver struct {
