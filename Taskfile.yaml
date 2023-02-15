@@ -9,3 +9,7 @@ tasks:
     desc: 'Format codebase'
     cmds:
       - go fmt ./...
+  upgrade:
+    desc: 'Upgrade dependencies'
+    cmds:
+      - go get -u -t ./...
