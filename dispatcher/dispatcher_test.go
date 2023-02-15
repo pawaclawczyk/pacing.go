@@ -10,11 +10,19 @@ import (
 
 const Delay = time.Millisecond
 
+func ConsumerNameCallback(consumers []string) map[string]interface{} {
+	res := make(map[string]interface{}, len(consumers))
+	for _, c := range consumers {
+		res[c] = c
+	}
+	return res
+}
+
 func TestNewDispatcher(t *testing.T) {
 	srv := RunServer()
 	defer srv.Shutdown()
 
-	dispatcher, err := NewDispatcher()
+	dispatcher, err := NewDispatcher(ConsumerNameCallback)
 	assert.Nil(t, err)
 	assert.NotNil(t, dispatcher)
 
@@ -28,7 +36,7 @@ func TestWatchAnnouncements(t *testing.T) {
 	srv := RunServer()
 	defer srv.Shutdown()
 
-	dispatcher, err := NewDispatcher()
+	dispatcher, err := NewDispatcher(ConsumerNameCallback)
 	assert.Nil(t, err)
 
 	err = dispatcher.Run()
@@ -65,7 +73,7 @@ func TestDispatchWorkload(t *testing.T) {
 	srv := RunServer()
 	defer srv.Shutdown()
 
-	dispatcher, _ := NewDispatcher()
+	dispatcher, _ := NewDispatcher(ConsumerNameCallback)
 	dispatcher.period = 100 * time.Millisecond
 	_ = dispatcher.Run()
 	defer dispatcher.Shutdown()

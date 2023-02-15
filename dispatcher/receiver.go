@@ -8,13 +8,13 @@ import (
 	"time"
 )
 
-type WorkloadCallback func(w string)
+type ConsumeCallback func(w string)
 
 type Receiver struct {
 	url                 string
 	announcements       string
 	announcementsPeriod time.Duration
-	cb                  WorkloadCallback
+	ccb                 ConsumeCallback
 
 	conn  *nats.Conn
 	inbox string
@@ -22,12 +22,12 @@ type Receiver struct {
 	sub   *nats.Subscription
 }
 
-func NewReceiver(cb func(workload string)) (*Receiver, error) {
+func NewReceiver(ccb func(workload string)) (*Receiver, error) {
 	return &Receiver{
 		url:                 nats.DefaultURL,
 		announcements:       DefaultAnnouncements,
 		announcementsPeriod: DefaultAnnouncementPeriod,
-		cb:                  cb,
+		ccb:                 ccb,
 	}, nil
 }
 
@@ -44,7 +44,7 @@ func (r *Receiver) Run() error {
 	r.inbox = nats.NewInbox()
 	// Subscribe for workloads
 	r.sub, err = r.conn.Subscribe(r.inbox, func(msg *nats.Msg) {
-		r.cb(string(msg.Data))
+		r.ccb(string(msg.Data))
 	})
 	// Run processes
 	r.done = make(chan byte)

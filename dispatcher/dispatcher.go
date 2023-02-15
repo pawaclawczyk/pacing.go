@@ -9,23 +9,27 @@ import (
 	"time"
 )
 
+type WorkloadCallback func(consumers []string) map[string]interface{}
+
 type Dispatcher struct {
 	url           string
 	announcements string
 	consumers     *consumers
 	period        time.Duration
+	wcb           WorkloadCallback
 
 	conn *nats.Conn
 	sub  *nats.Subscription
 	done chan byte
 }
 
-func NewDispatcher() (*Dispatcher, error) {
+func NewDispatcher(wcb WorkloadCallback) (*Dispatcher, error) {
 	return &Dispatcher{
 		url:           nats.DefaultURL,
 		announcements: DefaultAnnouncements,
 		consumers:     newConsumers(),
 		period:        DefaultDispatcherPeriod,
+		wcb:           wcb,
 	}, nil
 }
 
@@ -64,10 +68,10 @@ func (d *Dispatcher) dispatcher() {
 	for {
 		select {
 		case <-ticker.C:
-			for _, subject := range d.consumers.list() {
-				enc, err = json.Marshal(subject)
+			for c, w := range d.wcb(d.consumers.list()) {
+				enc, err = json.Marshal(w)
 				shared.PanicIf(err)
-				err = d.conn.Publish(subject, enc)
+				err = d.conn.Publish(c, enc)
 				shared.PanicIf(err)
 			}
 		case <-d.done:
