@@ -9,6 +9,95 @@ import (
 
 const Delay = time.Millisecond
 
+func TestAddAndListConsumers(t *testing.T) {
+	cs := newConsumers()
+	cs.add("consumer-1")
+	cs.add("consumer-2")
+	assert.Len(t, cs.list(), 2)
+	assert.Contains(t, cs.list(), "consumer-1")
+	assert.Contains(t, cs.list(), "consumer-2")
+	cs.add("consumer-2")
+	assert.Len(t, cs.list(), 2)
+}
+
+func TestTTLCleaner(t *testing.T) {
+	cs := newConsumers()
+	cs.ttl = 5 * time.Millisecond
+	cs.checkTTLPeriod = time.Millisecond
+	cs.enableTTL()
+
+	cs.add("consumer-1")
+	assert.Len(t, cs.list(), 1)
+	assert.Contains(t, cs.list(), "consumer-1")
+
+	time.Sleep(2 * time.Millisecond)
+	cs.add("consumer-2")
+	assert.Len(t, cs.list(), 2)
+	assert.Contains(t, cs.list(), "consumer-1")
+	assert.Contains(t, cs.list(), "consumer-2")
+
+	time.Sleep(4 * time.Millisecond)
+	assert.Len(t, cs.list(), 1)
+	assert.Contains(t, cs.list(), "consumer-2")
+
+	time.Sleep(2 * time.Millisecond)
+	assert.Len(t, cs.list(), 0)
+}
+
+func TestTTLCleanerNotEnabled(t *testing.T) {
+	cs := newConsumers()
+	cs.ttl = 5 * time.Millisecond
+	cs.checkTTLPeriod = time.Millisecond
+
+	cs.add("consumer-1")
+	assert.Len(t, cs.list(), 1)
+	assert.Contains(t, cs.list(), "consumer-1")
+
+	time.Sleep(10 * time.Millisecond)
+	assert.Len(t, cs.list(), 1)
+	assert.Contains(t, cs.list(), "consumer-1")
+}
+
+func TestTTLCleanerDisabled(t *testing.T) {
+	cs := newConsumers()
+	cs.ttl = 5 * time.Millisecond
+	cs.checkTTLPeriod = time.Millisecond
+	cs.enableTTL()
+	cs.disableTTL()
+
+	cs.add("consumer-1")
+	assert.Len(t, cs.list(), 1)
+	assert.Contains(t, cs.list(), "consumer-1")
+
+	time.Sleep(10 * time.Millisecond)
+	assert.Len(t, cs.list(), 1)
+	assert.Contains(t, cs.list(), "consumer-1")
+}
+
+func TestEnableTTLTwice(t *testing.T) {
+	cs := newConsumers()
+	cs.ttl = 5 * time.Millisecond
+	cs.checkTTLPeriod = time.Millisecond
+	cs.enableTTL()
+	cs.enableTTL()
+}
+
+func TestDisableTTLWhenNotEnabled(t *testing.T) {
+	cs := newConsumers()
+	cs.ttl = 5 * time.Millisecond
+	cs.checkTTLPeriod = time.Millisecond
+	cs.disableTTL()
+}
+
+func TestDisableTTLTwice(t *testing.T) {
+	cs := newConsumers()
+	cs.ttl = 5 * time.Millisecond
+	cs.checkTTLPeriod = time.Millisecond
+	cs.enableTTL()
+	cs.disableTTL()
+	cs.disableTTL()
+}
+
 func TestNewDispatcher(t *testing.T) {
 	srv := RunServer()
 	defer srv.Shutdown()
@@ -42,7 +131,7 @@ func TestWatchAnnouncements(t *testing.T) {
 
 	time.Sleep(Delay)
 
-	consumers := dispatcher.Consumers()
+	consumers := dispatcher.consumers.list()
 	assert.Len(t, consumers, 1)
 	assert.Contains(t, consumers, "consumer-1")
 
@@ -53,54 +142,11 @@ func TestWatchAnnouncements(t *testing.T) {
 
 	time.Sleep(Delay)
 
-	consumers = dispatcher.Consumers()
+	consumers = dispatcher.consumers.list()
 	assert.Len(t, consumers, 3)
 	assert.Contains(t, consumers, "consumer-1")
 	assert.Contains(t, consumers, "consumer-2")
 	assert.Contains(t, consumers, "consumer-3")
-}
-
-func TestConsumersWatcher(t *testing.T) {
-	srv := RunServer()
-	defer srv.Shutdown()
-
-	dispatcher, _ := NewDispatcher()
-	dispatcher.consumersTTL = 100 * time.Millisecond
-	dispatcher.consumersTTLCheck = 100 * time.Millisecond
-	_ = dispatcher.Run()
-	defer dispatcher.Shutdown()
-
-	nc, err := nats.Connect(nats.DefaultURL)
-	assert.Nil(t, err)
-
-	assert.Empty(t, dispatcher.Consumers())
-
-	err = nc.Publish(DefaultAnnouncements, []byte("consumer-1"))
-	assert.Nil(t, err)
-
-	time.Sleep(Delay)
-
-	assert.Len(t, dispatcher.Consumers(), 1)
-
-	err = nc.Publish(DefaultAnnouncements, []byte("consumer-2"))
-	assert.Nil(t, err)
-	err = nc.Publish(DefaultAnnouncements, []byte("consumer-3"))
-	assert.Nil(t, err)
-
-	time.Sleep(Delay)
-
-	assert.Len(t, dispatcher.Consumers(), 3)
-
-	err = nc.Publish(DefaultAnnouncements, []byte("consumer-2"))
-	assert.Nil(t, err)
-
-	time.Sleep(Delay)
-
-	assert.Len(t, dispatcher.Consumers(), 3)
-
-	time.Sleep(200 * time.Millisecond)
-
-	assert.Empty(t, dispatcher.Consumers())
 }
 
 func TestDispatchWorkload(t *testing.T) {
@@ -109,8 +155,6 @@ func TestDispatchWorkload(t *testing.T) {
 
 	dispatcher, _ := NewDispatcher()
 	dispatcher.period = 100 * time.Millisecond
-	dispatcher.consumersTTL = 100 * time.Millisecond
-	dispatcher.consumersTTLCheck = 100 * time.Millisecond
 	_ = dispatcher.Run()
 	defer dispatcher.Shutdown()
 

@@ -10,34 +10,95 @@ import (
 )
 
 const DefaultConsumersTTL = 30 * time.Second
-const DefaultConsumersTTLCheck = 30 * time.Second
+const DefaultConsumersCheckTTLPeriod = DefaultConsumersTTL / 2
 const DefaultPeriod = 1 * time.Minute
 
+type consumers struct {
+	mu             sync.RWMutex
+	consumers      map[string]time.Time
+	ttl            time.Duration
+	checkTTLPeriod time.Duration
+	done           chan byte
+}
+
+func newConsumers() *consumers {
+	return &consumers{
+		mu:             sync.RWMutex{},
+		consumers:      make(map[string]time.Time),
+		ttl:            DefaultConsumersTTL,
+		checkTTLPeriod: DefaultConsumersCheckTTLPeriod,
+	}
+}
+
+func (cs *consumers) add(c string) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.consumers[c] = time.Now().Add(cs.ttl)
+}
+
+func (cs *consumers) list() []string {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	var res []string
+	for c := range cs.consumers {
+		res = append(res, c)
+	}
+	return res
+}
+
+func (cs *consumers) enableTTL() {
+	if cs.done != nil {
+		return
+	}
+	cs.done = make(chan byte)
+	go cs.ttlCleaner()
+}
+
+func (cs *consumers) disableTTL() {
+	if cs.done != nil {
+		cs.done <- 1
+		close(cs.done)
+		cs.done = nil
+	}
+}
+
+func (cs *consumers) ttlCleaner() {
+	var t time.Time
+	ticker := time.NewTicker(cs.checkTTLPeriod)
+	for {
+		select {
+		case t = <-ticker.C:
+			cs.mu.Lock()
+			for c, ts := range cs.consumers {
+				if ts.Before(t) {
+					delete(cs.consumers, c)
+				}
+			}
+			cs.mu.Unlock()
+		case <-cs.done:
+			ticker.Stop()
+			return
+		}
+	}
+}
+
 type Dispatcher struct {
-	url                  string
-	announcements        string
-	conn                 *nats.Conn
-	period               time.Duration
-	done                 chan bool
-	consumers            map[string]time.Time
-	consumersTTL         time.Duration
-	consumersTTLCheck    time.Duration
-	consumersCleanerDone chan bool
-	consumersMutex       sync.Mutex
-	watcherSub           *nats.Subscription
+	url           string
+	announcements string
+	conn          *nats.Conn
+	period        time.Duration
+	done          chan bool
+	consumers     *consumers
+	watcherSub    *nats.Subscription
 }
 
 func NewDispatcher() (*Dispatcher, error) {
 	return &Dispatcher{
-		url:                  nats.DefaultURL,
-		announcements:        DefaultAnnouncements,
-		period:               DefaultPeriod,
-		done:                 make(chan bool),
-		consumers:            make(map[string]time.Time),
-		consumersTTL:         DefaultConsumersTTL,
-		consumersTTLCheck:    DefaultConsumersTTLCheck,
-		consumersCleanerDone: make(chan bool),
-		consumersMutex:       sync.Mutex{},
+		url:           nats.DefaultURL,
+		announcements: DefaultAnnouncements,
+		period:        DefaultPeriod,
+		done:          make(chan bool),
+		consumers:     newConsumers(),
 	}, nil
 }
 
@@ -54,44 +115,14 @@ func (d *Dispatcher) Run() error {
 	if err != nil {
 		return err
 	}
-	go d.DeleteUnseenConsumers()
+	d.consumers.enableTTL()
 	go d.DispatchWorkload()
 	return nil
 }
 
 func (d *Dispatcher) watchAnnouncements(msg *nats.Msg) {
 	consumer := string(msg.Data)
-	d.consumersMutex.Lock()
-	defer d.consumersMutex.Unlock()
-	d.consumers[consumer] = time.Now()
-}
-
-func (d *Dispatcher) DeleteUnseenConsumers() {
-	tick := time.Tick(d.consumersTTLCheck)
-	for {
-		select {
-		case <-tick:
-			d.consumersMutex.Lock()
-			for k, v := range d.consumers {
-				if v.Before(time.Now().Add(-d.consumersTTL)) {
-					delete(d.consumers, k)
-				}
-			}
-			d.consumersMutex.Unlock()
-		case <-d.consumersCleanerDone:
-			return
-		}
-	}
-}
-
-func (d *Dispatcher) Consumers() []string {
-	var watchers []string
-	d.consumersMutex.Lock()
-	defer d.consumersMutex.Unlock()
-	for k := range d.consumers {
-		watchers = append(watchers, k)
-	}
-	return watchers
+	d.consumers.add(consumer)
 }
 
 func (d *Dispatcher) DispatchWorkload() {
@@ -101,7 +132,7 @@ func (d *Dispatcher) DispatchWorkload() {
 	for {
 		select {
 		case <-tick:
-			consumers = d.Consumers()
+			consumers = d.consumers.list()
 			for _, subject := range consumers {
 				err = d.conn.Publish(subject, []byte(subject))
 				shared.PanicIf(err)
@@ -114,7 +145,7 @@ func (d *Dispatcher) DispatchWorkload() {
 }
 
 func (d *Dispatcher) Shutdown() {
-	d.consumersCleanerDone <- true
+	d.consumers.disableTTL()
 	d.done <- true
 	d.conn.Close()
 }
