@@ -1,6 +1,7 @@
 package dispatcher
 
 import (
+	"encoding/json"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"testing"
@@ -93,6 +94,11 @@ func TestDispatchWorkload(t *testing.T) {
 	err = c2.Unsubscribe()
 	assert.Nil(t, err)
 
-	assert.Equal(t, "consumer-1", string(msg1.Data))
-	assert.Equal(t, "consumer-2", string(msg2.Data))
+	var workload string
+	err = json.Unmarshal(msg1.Data, &workload)
+	assert.Nil(t, err)
+	assert.Equal(t, "consumer-1", workload)
+	err = json.Unmarshal(msg2.Data, &workload)
+	assert.Nil(t, err)
+	assert.Equal(t, "consumer-2", workload)
 }

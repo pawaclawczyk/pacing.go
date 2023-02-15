@@ -1,6 +1,7 @@
 package dispatcher
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/nats-io/nats.go"
@@ -58,12 +59,15 @@ func (d *Dispatcher) watchAnnouncements(msg *nats.Msg) {
 
 func (d *Dispatcher) dispatcher() {
 	var err error
+	var enc []byte
 	ticker := time.NewTicker(d.period)
 	for {
 		select {
 		case <-ticker.C:
 			for _, subject := range d.consumers.list() {
-				err = d.conn.Publish(subject, []byte(subject))
+				enc, err = json.Marshal(subject)
+				shared.PanicIf(err)
+				err = d.conn.Publish(subject, enc)
 				shared.PanicIf(err)
 			}
 		case <-d.done:
