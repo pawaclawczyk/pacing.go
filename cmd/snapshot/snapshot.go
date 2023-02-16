@@ -5,6 +5,7 @@ import (
 	"github.com/google/uuid"
 	"math/rand"
 	"os"
+	"pacing.go/pacing"
 	"pacing.go/shared"
 	"path"
 )
@@ -12,17 +13,10 @@ import (
 const lineItemsCount = 1_000_000
 const snapshotPath = "tmp/snapshot.json"
 
-type record struct {
-	LineItemID  uuid.UUID
-	DailyBudget int64
-}
-
-const currencyUnit int64 = 1_000_000
-
-func randomRecord() *record {
-	return &record{
+func randomRecord() *pacing.Record {
+	return &pacing.Record{
 		LineItemID:  uuid.New(),
-		DailyBudget: rand.Int63n(100_000 * currencyUnit),
+		DailyBudget: rand.Int63n(100_000 * pacing.CurrencyUnit),
 	}
 }
 
