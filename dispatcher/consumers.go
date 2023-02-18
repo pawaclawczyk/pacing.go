@@ -31,7 +31,7 @@ func (cs *consumers) add(c string) {
 func (cs *consumers) list() []string {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
-	var res []string
+	res := make([]string, len(cs.consumers))[:0]
 	for c := range cs.consumers {
 		res = append(res, c)
 	}

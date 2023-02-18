@@ -1,6 +1,7 @@
 package dispatcher
 
 import (
+	"fmt"
 	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
@@ -93,4 +94,25 @@ func TestDisableTTLTwice(t *testing.T) {
 	cs.enableTTL()
 	cs.disableTTL()
 	cs.disableTTL()
+}
+
+func BenchmarkConsumers(b *testing.B) {
+	var m *consumers
+
+	m = newConsumers()
+	b.Run("add", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			m.add(fmt.Sprintf("item-%d", i))
+		}
+	})
+
+	m = newConsumers()
+	for i := 0; i < 100; i++ {
+		m.add(fmt.Sprintf("item-%d", i))
+	}
+	b.Run("list_100", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			m.list()
+		}
+	})
 }
