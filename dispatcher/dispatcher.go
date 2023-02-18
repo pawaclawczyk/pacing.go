@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/nats-io/nats.go"
+	"github.com/rs/zerolog/log"
 	"pacing.go/shared"
 	"time"
 )
@@ -69,6 +70,7 @@ func (d *Dispatcher) dispatcher() {
 		select {
 		case <-ticker.C:
 			for c, w := range d.wcb(d.consumers.list()) {
+				log.Debug().Msg(fmt.Sprintf("(dispatcher) sending workload to consumer: %v", c))
 				enc, err = json.Marshal(w)
 				shared.PanicIf(err)
 				err = d.conn.Publish(c, enc)

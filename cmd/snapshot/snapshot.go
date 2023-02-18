@@ -10,7 +10,7 @@ import (
 	"path"
 )
 
-const lineItemsCount = 1_000_000
+const lineItemsCount = 10
 const snapshotPath = "tmp/snapshot.json"
 
 func randomRecord() *pacing.Record {
