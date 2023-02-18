@@ -54,15 +54,15 @@ func (r *Receiver) Run() error {
 
 func (r *Receiver) Announcer(done <-chan byte) {
 	var err error
-	tick := time.Tick(r.announcementsPeriod)
+	ticker := time.NewTicker(r.announcementsPeriod)
 	for {
 		select {
-		case <-tick:
+		case <-ticker.C:
 			err = r.conn.Publish(r.announcements, []byte(r.inbox))
 			shared.PanicIf(err)
 		case <-done:
+			ticker.Stop()
 			return
-		default:
 		}
 	}
 }
