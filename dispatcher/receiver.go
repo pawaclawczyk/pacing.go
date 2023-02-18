@@ -16,10 +16,11 @@ type Receiver struct {
 	announcementsPeriod time.Duration
 	ccb                 ConsumeCallback
 
-	conn  *nats.Conn
-	inbox string
-	done  chan byte
-	sub   *nats.Subscription
+	conn         *nats.Conn
+	inbox        string
+	announcement []byte
+	done         chan byte
+	sub          *nats.Subscription
 }
 
 func NewReceiver(ccb func(workload string)) (*Receiver, error) {
@@ -47,6 +48,7 @@ func (r *Receiver) Run() error {
 		r.ccb(string(msg.Data))
 	})
 	// Run processes
+	r.announcement = []byte(r.inbox)
 	r.done = make(chan byte)
 	go r.Announcer(r.done)
 	return nil
@@ -58,7 +60,7 @@ func (r *Receiver) Announcer(done <-chan byte) {
 	for {
 		select {
 		case <-ticker.C:
-			err = r.conn.Publish(r.announcements, []byte(r.inbox))
+			err = r.conn.Publish(r.announcements, r.announcement)
 			shared.PanicIf(err)
 		case <-done:
 			ticker.Stop()
