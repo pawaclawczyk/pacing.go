@@ -38,6 +38,16 @@ func (cs *consumers) list() []string {
 	return res
 }
 
+func (cs *consumers) deleteOutdated(t time.Time) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	for c, ts := range cs.consumers {
+		if ts.Compare(t) <= 0 {
+			delete(cs.consumers, c)
+		}
+	}
+}
+
 func (cs *consumers) enableTTL() {
 	if cs.done != nil {
 		return
@@ -60,13 +70,7 @@ func (cs *consumers) ttlCleaner() {
 	for {
 		select {
 		case t = <-ticker.C:
-			cs.mu.Lock()
-			for c, ts := range cs.consumers {
-				if ts.Before(t) {
-					delete(cs.consumers, c)
-				}
-			}
-			cs.mu.Unlock()
+			cs.deleteOutdated(t)
 		case <-cs.done:
 			ticker.Stop()
 			return

@@ -3,6 +3,7 @@ package dispatcher
 import (
 	"fmt"
 	"github.com/stretchr/testify/assert"
+	"sort"
 	"testing"
 	"time"
 )
@@ -115,4 +116,35 @@ func BenchmarkConsumers(b *testing.B) {
 			m.list()
 		}
 	})
+}
+
+func TestDeleteOutdated(t *testing.T) {
+	refT := time.Date(2023, 2, 20, 13, 38, 0, 0, time.Local)
+	type args struct {
+		consumers map[string]time.Time
+		t         time.Time
+	}
+	tests := []struct {
+		name string
+		args args
+		want []string
+	}{
+		{"empty", args{map[string]time.Time{}, refT}, []string{}},
+		{"before", args{map[string]time.Time{"consumer-a": refT, "consumer-b": refT}, refT.Add(-time.Second)}, []string{"consumer-a", "consumer-b"}},
+		{"equal to older", args{map[string]time.Time{"consumer-a": refT, "consumer-b": refT.Add(time.Second)}, refT}, []string{"consumer-b"}},
+		{"between", args{map[string]time.Time{"consumer-a": refT, "consumer-b": refT.Add(2 * time.Second)}, refT.Add(time.Second)}, []string{"consumer-b"}},
+		{"equal to newer", args{map[string]time.Time{"consumer-a": refT, "consumer-b": refT.Add(time.Second)}, refT.Add(time.Second)}, []string{}},
+		{"after", args{map[string]time.Time{"consumer-a": refT, "consumer-b": refT}, refT.Add(time.Second)}, []string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cs := newConsumers()
+			cs.consumers = tt.args.consumers
+			cs.deleteOutdated(tt.args.t)
+			sort.Strings(tt.want)
+			actual := cs.list()
+			sort.Strings(actual)
+			assert.Equal(t, tt.want, actual)
+		})
+	}
 }
