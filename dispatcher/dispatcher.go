@@ -15,7 +15,7 @@ type WorkloadCallback func(consumers []string) map[string]interface{}
 type Dispatcher struct {
 	url           string
 	announcements string
-	consumers     *consumers
+	consumers     *consumersConcurrentExpiration
 	period        time.Duration
 	wcb           WorkloadCallback
 
@@ -28,7 +28,7 @@ func NewDispatcher(wcb WorkloadCallback) (*Dispatcher, error) {
 	return &Dispatcher{
 		url:           nats.DefaultURL,
 		announcements: DefaultAnnouncements,
-		consumers:     newConsumers(),
+		consumers:     newConsumersConcurrentExpiration(),
 		period:        DefaultDispatcherPeriod,
 		wcb:           wcb,
 	}, nil
@@ -44,7 +44,7 @@ func (d *Dispatcher) Run() error {
 	if !d.conn.IsConnected() {
 		return errors.New(fmt.Sprintf("Cannot connect, connection status is %s\n", d.conn.Status()))
 	}
-	// Enable TTL on consumers
+	// Enable TTL on consumersConcurrentExpiration
 	d.consumers.enableTTL()
 	// Subscribe to announcements
 	d.sub, err = d.conn.Subscribe(d.announcements, d.watchAnnouncements)
@@ -96,7 +96,7 @@ func (d *Dispatcher) Shutdown() {
 		_ = d.sub.Unsubscribe()
 		d.sub = nil
 	}
-	// Shutdown consumers routine
+	// Shutdown consumersConcurrentExpiration routine
 	d.consumers.disableTTL()
 	// Disconnect fromNATS server
 	d.conn.Close()

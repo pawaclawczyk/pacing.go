@@ -9,7 +9,7 @@ import (
 )
 
 func TestAddAndListConsumers(t *testing.T) {
-	cs := newConsumers()
+	cs := newConsumersConcurrentExpiration()
 	cs.add("consumer-1")
 	cs.add("consumer-2")
 	assert.Len(t, cs.list(), 2)
@@ -20,7 +20,7 @@ func TestAddAndListConsumers(t *testing.T) {
 }
 
 func TestTTLCleaner(t *testing.T) {
-	cs := newConsumers()
+	cs := newConsumersConcurrentExpiration()
 	cs.ttl = 5 * time.Millisecond
 	cs.checkTTLPeriod = time.Millisecond
 	cs.enableTTL()
@@ -44,7 +44,7 @@ func TestTTLCleaner(t *testing.T) {
 }
 
 func TestTTLCleanerNotEnabled(t *testing.T) {
-	cs := newConsumers()
+	cs := newConsumersConcurrentExpiration()
 	cs.ttl = 5 * time.Millisecond
 	cs.checkTTLPeriod = time.Millisecond
 
@@ -58,7 +58,7 @@ func TestTTLCleanerNotEnabled(t *testing.T) {
 }
 
 func TestTTLCleanerDisabled(t *testing.T) {
-	cs := newConsumers()
+	cs := newConsumersConcurrentExpiration()
 	cs.ttl = 5 * time.Millisecond
 	cs.checkTTLPeriod = time.Millisecond
 	cs.enableTTL()
@@ -74,7 +74,7 @@ func TestTTLCleanerDisabled(t *testing.T) {
 }
 
 func TestEnableTTLTwice(t *testing.T) {
-	cs := newConsumers()
+	cs := newConsumersConcurrentExpiration()
 	cs.ttl = 5 * time.Millisecond
 	cs.checkTTLPeriod = time.Millisecond
 	cs.enableTTL()
@@ -82,14 +82,14 @@ func TestEnableTTLTwice(t *testing.T) {
 }
 
 func TestDisableTTLWhenNotEnabled(t *testing.T) {
-	cs := newConsumers()
+	cs := newConsumersConcurrentExpiration()
 	cs.ttl = 5 * time.Millisecond
 	cs.checkTTLPeriod = time.Millisecond
 	cs.disableTTL()
 }
 
 func TestDisableTTLTwice(t *testing.T) {
-	cs := newConsumers()
+	cs := newConsumersConcurrentExpiration()
 	cs.ttl = 5 * time.Millisecond
 	cs.checkTTLPeriod = time.Millisecond
 	cs.enableTTL()
@@ -98,16 +98,16 @@ func TestDisableTTLTwice(t *testing.T) {
 }
 
 func BenchmarkConsumers(b *testing.B) {
-	var m *consumers
+	var m *consumersConcurrentExpiration
 
-	m = newConsumers()
+	m = newConsumersConcurrentExpiration()
 	b.Run("add", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			m.add(fmt.Sprintf("item-%d", i))
 		}
 	})
 
-	m = newConsumers()
+	m = newConsumersConcurrentExpiration()
 	for i := 0; i < 100; i++ {
 		m.add(fmt.Sprintf("item-%d", i))
 	}
@@ -138,13 +138,36 @@ func TestDeleteOutdated(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cs := newConsumers()
+			cs := newConsumersConcurrentExpiration()
 			cs.consumers = tt.args.consumers
-			cs.deleteOutdated(tt.args.t)
+			cs.deleteExpired(tt.args.t)
 			sort.Strings(tt.want)
 			actual := cs.list()
 			sort.Strings(actual)
 			assert.Equal(t, tt.want, actual)
 		})
 	}
+}
+
+func BenchmarkConsumersList(b *testing.B) {
+	concurrent := newConsumersConcurrentExpiration()
+	concurrent.enableTTL()
+	for i := 0; i < 100; i++ {
+		concurrent.add(fmt.Sprintf("consumer-%d", i))
+	}
+	b.Run("concurrent expiration", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			concurrent.list()
+		}
+	})
+	concurrent.disableTTL()
+	amortized := newConsumersAmortizedExpiration()
+	for i := 0; i < 100; i++ {
+		amortized.add(fmt.Sprintf("consumer-%d", i))
+	}
+	b.Run("amortized expiration", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			amortized.list()
+		}
+	})
 }
