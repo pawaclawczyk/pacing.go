@@ -15,7 +15,7 @@ type WorkloadCallback func(consumers []string) map[string]interface{}
 type Dispatcher struct {
 	url           string
 	announcements string
-	consumers     *consumersConcurrentExpiration
+	cons          *Consumers
 	period        time.Duration
 	wcb           WorkloadCallback
 
@@ -28,7 +28,7 @@ func NewDispatcher(wcb WorkloadCallback) (*Dispatcher, error) {
 	return &Dispatcher{
 		url:           nats.DefaultURL,
 		announcements: DefaultAnnouncements,
-		consumers:     newConsumersConcurrentExpiration(),
+		cons:          NewConsumers(),
 		period:        DefaultDispatcherPeriod,
 		wcb:           wcb,
 	}, nil
@@ -44,8 +44,6 @@ func (d *Dispatcher) Run() error {
 	if !d.conn.IsConnected() {
 		return errors.New(fmt.Sprintf("Cannot connect, connection status is %s\n", d.conn.Status()))
 	}
-	// Enable TTL on consumersConcurrentExpiration
-	d.consumers.enableTTL()
 	// Subscribe to announcements
 	d.sub, err = d.conn.Subscribe(d.announcements, d.watchAnnouncements)
 	if err != nil {
@@ -59,7 +57,7 @@ func (d *Dispatcher) Run() error {
 }
 
 func (d *Dispatcher) watchAnnouncements(msg *nats.Msg) {
-	d.consumers.add(string(msg.Data))
+	d.cons.Join(string(msg.Data))
 }
 
 func (d *Dispatcher) dispatcher() {
@@ -69,7 +67,7 @@ func (d *Dispatcher) dispatcher() {
 	for {
 		select {
 		case <-ticker.C:
-			for c, w := range d.wcb(d.consumers.list()) {
+			for c, w := range d.wcb(d.cons.List()) {
 				log.Debug().Msg(fmt.Sprintf("(dispatcher) sending workload to consumer: %v", c))
 				enc, err = json.Marshal(w)
 				shared.PanicIf(err)
@@ -96,8 +94,6 @@ func (d *Dispatcher) Shutdown() {
 		_ = d.sub.Unsubscribe()
 		d.sub = nil
 	}
-	// Shutdown consumersConcurrentExpiration routine
-	d.consumers.disableTTL()
 	// Disconnect fromNATS server
 	d.conn.Close()
 }

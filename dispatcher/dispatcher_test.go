@@ -51,7 +51,7 @@ func TestWatchAnnouncements(t *testing.T) {
 
 	time.Sleep(Delay)
 
-	consumers := dispatcher.consumers.list()
+	consumers := dispatcher.cons.List()
 	assert.Len(t, consumers, 1)
 	assert.Contains(t, consumers, "consumer-1")
 
@@ -62,7 +62,7 @@ func TestWatchAnnouncements(t *testing.T) {
 
 	time.Sleep(Delay)
 
-	consumers = dispatcher.consumers.list()
+	consumers = dispatcher.cons.List()
 	assert.Len(t, consumers, 3)
 	assert.Contains(t, consumers, "consumer-1")
 	assert.Contains(t, consumers, "consumer-2")

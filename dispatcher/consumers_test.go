@@ -1,173 +1,87 @@
 package dispatcher
 
 import (
-	"fmt"
 	"github.com/stretchr/testify/assert"
 	"sort"
 	"testing"
 	"time"
 )
 
-func TestAddAndListConsumers(t *testing.T) {
-	cs := newConsumersConcurrentExpiration()
-	cs.add("consumer-1")
-	cs.add("consumer-2")
-	assert.Len(t, cs.list(), 2)
-	assert.Contains(t, cs.list(), "consumer-1")
-	assert.Contains(t, cs.list(), "consumer-2")
-	cs.add("consumer-2")
-	assert.Len(t, cs.list(), 2)
+func TestNewConsumers(t *testing.T) {
+	cs := NewConsumers()
+	assert.Equal(t, cs.opts.ttl, DefaultTTL)
+	assert.Len(t, cs.ttlSet, 0)
 }
 
-func TestTTLCleaner(t *testing.T) {
-	cs := newConsumersConcurrentExpiration()
-	cs.ttl = 5 * time.Millisecond
-	cs.checkTTLPeriod = time.Millisecond
-	cs.enableTTL()
-
-	cs.add("consumer-1")
-	assert.Len(t, cs.list(), 1)
-	assert.Contains(t, cs.list(), "consumer-1")
-
-	time.Sleep(2 * time.Millisecond)
-	cs.add("consumer-2")
-	assert.Len(t, cs.list(), 2)
-	assert.Contains(t, cs.list(), "consumer-1")
-	assert.Contains(t, cs.list(), "consumer-2")
-
-	time.Sleep(4 * time.Millisecond)
-	assert.Len(t, cs.list(), 1)
-	assert.Contains(t, cs.list(), "consumer-2")
-
-	time.Sleep(2 * time.Millisecond)
-	assert.Len(t, cs.list(), 0)
-}
-
-func TestTTLCleanerNotEnabled(t *testing.T) {
-	cs := newConsumersConcurrentExpiration()
-	cs.ttl = 5 * time.Millisecond
-	cs.checkTTLPeriod = time.Millisecond
-
-	cs.add("consumer-1")
-	assert.Len(t, cs.list(), 1)
-	assert.Contains(t, cs.list(), "consumer-1")
-
-	time.Sleep(10 * time.Millisecond)
-	assert.Len(t, cs.list(), 1)
-	assert.Contains(t, cs.list(), "consumer-1")
-}
-
-func TestTTLCleanerDisabled(t *testing.T) {
-	cs := newConsumersConcurrentExpiration()
-	cs.ttl = 5 * time.Millisecond
-	cs.checkTTLPeriod = time.Millisecond
-	cs.enableTTL()
-	cs.disableTTL()
-
-	cs.add("consumer-1")
-	assert.Len(t, cs.list(), 1)
-	assert.Contains(t, cs.list(), "consumer-1")
-
-	time.Sleep(10 * time.Millisecond)
-	assert.Len(t, cs.list(), 1)
-	assert.Contains(t, cs.list(), "consumer-1")
-}
-
-func TestEnableTTLTwice(t *testing.T) {
-	cs := newConsumersConcurrentExpiration()
-	cs.ttl = 5 * time.Millisecond
-	cs.checkTTLPeriod = time.Millisecond
-	cs.enableTTL()
-	cs.enableTTL()
-}
-
-func TestDisableTTLWhenNotEnabled(t *testing.T) {
-	cs := newConsumersConcurrentExpiration()
-	cs.ttl = 5 * time.Millisecond
-	cs.checkTTLPeriod = time.Millisecond
-	cs.disableTTL()
-}
-
-func TestDisableTTLTwice(t *testing.T) {
-	cs := newConsumersConcurrentExpiration()
-	cs.ttl = 5 * time.Millisecond
-	cs.checkTTLPeriod = time.Millisecond
-	cs.enableTTL()
-	cs.disableTTL()
-	cs.disableTTL()
-}
-
-func BenchmarkConsumers(b *testing.B) {
-	var m *consumersConcurrentExpiration
-
-	m = newConsumersConcurrentExpiration()
-	b.Run("add", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m.add(fmt.Sprintf("item-%d", i))
-		}
-	})
-
-	m = newConsumersConcurrentExpiration()
-	for i := 0; i < 100; i++ {
-		m.add(fmt.Sprintf("item-%d", i))
+func TestConsumers_Join(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"none", []string{}, []string{}},
+		{"alice bob", []string{"alice", "bob"}, []string{"alice", "bob"}},
+		{"alice alice", []string{"alice", "alice"}, []string{"alice"}},
 	}
-	b.Run("list_100", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			m.list()
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Ensure test is not affected by expiring cons
+			cs := NewConsumers(WithTTL(time.Hour))
+			for _, con := range tt.args {
+				cs.Join(con)
+			}
+			got := cs.List()
+			sort.Strings(got)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
-func TestDeleteOutdated(t *testing.T) {
-	refT := time.Date(2023, 2, 20, 13, 38, 0, 0, time.Local)
+func TestConsumers_Leave(t *testing.T) {
 	type args struct {
-		consumers map[string]time.Time
-		t         time.Time
+		current []string
+		leaving []string
 	}
 	tests := []struct {
 		name string
 		args args
 		want []string
 	}{
-		{"empty", args{map[string]time.Time{}, refT}, []string{}},
-		{"before", args{map[string]time.Time{"consumer-a": refT, "consumer-b": refT}, refT.Add(-time.Second)}, []string{"consumer-a", "consumer-b"}},
-		{"equal to older", args{map[string]time.Time{"consumer-a": refT, "consumer-b": refT.Add(time.Second)}, refT}, []string{"consumer-b"}},
-		{"between", args{map[string]time.Time{"consumer-a": refT, "consumer-b": refT.Add(2 * time.Second)}, refT.Add(time.Second)}, []string{"consumer-b"}},
-		{"equal to newer", args{map[string]time.Time{"consumer-a": refT, "consumer-b": refT.Add(time.Second)}, refT.Add(time.Second)}, []string{}},
-		{"after", args{map[string]time.Time{"consumer-a": refT, "consumer-b": refT}, refT.Add(time.Second)}, []string{}},
+		{"{} - {alice}", args{[]string{}, []string{"alice"}}, []string{}},
+		{"{alice} - {alice}", args{[]string{"alice"}, []string{"alice"}}, []string{}},
+		{"{alice, bob} - {alice}", args{[]string{"alice", "bob"}, []string{"alice"}}, []string{"bob"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cs := newConsumersConcurrentExpiration()
-			cs.consumers = tt.args.consumers
-			cs.deleteExpired(tt.args.t)
-			sort.Strings(tt.want)
-			actual := cs.list()
-			sort.Strings(actual)
-			assert.Equal(t, tt.want, actual)
+			// Ensure test is not affected by expiring cons
+			cs := NewConsumers(WithTTL(time.Hour))
+			for _, con := range tt.args.current {
+				cs.Join(con)
+			}
+			for _, con := range tt.args.leaving {
+				cs.Leave(con)
+			}
+			got := cs.List()
+			sort.Strings(got)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
-func BenchmarkConsumersList(b *testing.B) {
-	concurrent := newConsumersConcurrentExpiration()
-	concurrent.enableTTL()
-	for i := 0; i < 100; i++ {
-		concurrent.add(fmt.Sprintf("consumer-%d", i))
+func TestWithTTL(t *testing.T) {
+	tests := []struct {
+		name string
+		args time.Duration
+		want time.Duration
+	}{
+		{"positive", time.Second, time.Second},
+		{"zero", 0, DefaultTTL},
+		{"negative", -time.Second, DefaultTTL},
 	}
-	b.Run("concurrent expiration", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			concurrent.list()
-		}
-	})
-	concurrent.disableTTL()
-	amortized := newConsumersAmortizedExpiration()
-	for i := 0; i < 100; i++ {
-		amortized.add(fmt.Sprintf("consumer-%d", i))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cs := NewConsumers(WithTTL(tt.args))
+			assert.Equal(t, tt.want, cs.opts.ttl)
+		})
 	}
-	b.Run("amortized expiration", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			amortized.list()
-		}
-	})
 }

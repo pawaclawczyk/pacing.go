@@ -5,127 +5,79 @@ import (
 	"time"
 )
 
-type consumersConcurrentExpiration struct {
-	mu             sync.RWMutex
-	consumers      map[string]time.Time
-	ttl            time.Duration
-	checkTTLPeriod time.Duration
-	done           chan byte
+// DefaultTTL is the default TTL value used in case when none or invalid provided.
+const DefaultTTL = time.Second
+
+// consumerOptions contains configurable options.
+type consumerOptions struct {
+	ttl time.Duration
 }
 
-func newConsumersConcurrentExpiration() *consumersConcurrentExpiration {
-	return &consumersConcurrentExpiration{
-		mu:             sync.RWMutex{},
-		consumers:      make(map[string]time.Time),
-		ttl:            DefaultConsumersTTL,
-		checkTTLPeriod: DefaultConsumersCheckTTLPeriod,
+// ConsumerOption type allows defining configurable options.
+type ConsumerOption func(opts *consumerOptions)
+
+// WithTTL allows configuring TTL value.
+func WithTTL(ttl time.Duration) ConsumerOption {
+	return func(opts *consumerOptions) {
+		opts.ttl = ttl
 	}
 }
 
-func (cs *consumersConcurrentExpiration) add(c string) {
+// Consumers represents a set of expiring cons.
+type Consumers struct {
+	opts   *consumerOptions
+	mu     sync.Mutex
+	now    func() time.Time
+	ttlSet map[string]time.Time
+}
+
+// NewConsumers creates an empty Consumers instance.
+// Configurable options are:
+// - WithTTL.
+func NewConsumers(opts ...ConsumerOption) *Consumers {
+	configured := &consumerOptions{}
+	for _, opt := range opts {
+		opt(configured)
+	}
+
+	if configured.ttl <= 0 {
+		configured.ttl = DefaultTTL
+	}
+
+	return &Consumers{
+		opts:   configured,
+		mu:     sync.Mutex{},
+		now:    time.Now,
+		ttlSet: make(map[string]time.Time, 10),
+	}
+}
+
+// Join adds given consumer to the set.
+func (cs *Consumers) Join(consumer string) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	cs.consumers[c] = time.Now().Add(cs.ttl)
+	cs.ttlSet[consumer] = cs.now().Add(cs.opts.ttl)
 }
 
-func (cs *consumersConcurrentExpiration) list() []string {
-	cs.mu.RLock()
-	defer cs.mu.RUnlock()
-	res := make([]string, 0, len(cs.consumers))
-	for c := range cs.consumers {
-		res = append(res, c)
-	}
-	return res
-}
-
-func (cs *consumersConcurrentExpiration) deleteExpired(t time.Time) {
+// Leave removes given consumer from the set.
+func (cs *Consumers) Leave(consumer string) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	for c, ts := range cs.consumers {
-		if ts.Compare(t) <= 0 {
-			delete(cs.consumers, c)
-		}
-	}
+	delete(cs.ttlSet, consumer)
 }
 
-func (cs *consumersConcurrentExpiration) enableTTL() {
-	if cs.done != nil {
-		return
-	}
-	cs.done = make(chan byte)
-	go cs.ttlCleaner()
-}
-
-func (cs *consumersConcurrentExpiration) disableTTL() {
-	if cs.done != nil {
-		cs.done <- 1
-		close(cs.done)
-		cs.done = nil
-	}
-}
-
-func (cs *consumersConcurrentExpiration) ttlCleaner() {
-	var t time.Time
-	ticker := time.NewTicker(cs.checkTTLPeriod)
-	for {
-		select {
-		case t = <-ticker.C:
-			cs.deleteExpired(t)
-		case <-cs.done:
-			ticker.Stop()
-			return
-		}
-	}
-}
-
-type consumersAmortizedExpiration struct {
-	mu        sync.RWMutex
-	consumers map[string]time.Time
-	ttl       time.Duration
-	now       func() time.Time
-}
-
-func newConsumersAmortizedExpiration() *consumersAmortizedExpiration {
-	return &consumersAmortizedExpiration{
-		mu:        sync.RWMutex{},
-		consumers: make(map[string]time.Time),
-		ttl:       DefaultConsumersTTL,
-		now:       time.Now,
-	}
-}
-
-func (cs *consumersAmortizedExpiration) add(c string) {
+// List returns not expired cons.
+func (cs *Consumers) List() []string {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	cs.consumers[c] = time.Now().Add(cs.ttl)
-}
-
-func (cs *consumersAmortizedExpiration) list() []string {
-	cs.mu.RLock()
-	n := len(cs.consumers)
-	expired := 0
 	now := cs.now()
-	res := make([]string, 0, n)
-	for c, exp := range cs.consumers {
-		if exp.After(now) {
-			res = append(res, c)
+	consumers := make([]string, 0, len(cs.ttlSet))
+	for con, ttl := range cs.ttlSet {
+		if ttl.After(now) {
+			consumers = append(consumers, con)
 		} else {
-			expired++
+			delete(cs.ttlSet, con)
 		}
 	}
-	cs.mu.RUnlock()
-	if expired*2 > n {
-		cs.deleteExpired(now)
-	}
-	return res
-}
-
-func (cs *consumersAmortizedExpiration) deleteExpired(t time.Time) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	for c, ts := range cs.consumers {
-		if ts.Compare(t) <= 0 {
-			delete(cs.consumers, c)
-		}
-	}
+	return consumers
 }
