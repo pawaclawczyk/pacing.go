@@ -44,7 +44,7 @@ func TestWorkloadInterceptor(t *testing.T) {
 }
 
 func TestNewReceiver(t *testing.T) {
-	srv := RunServer()
+	srv := RunTestServer()
 	defer srv.Shutdown()
 
 	receiver, err := NewReceiver(nop)
@@ -59,7 +59,7 @@ func TestNewReceiver(t *testing.T) {
 }
 
 func TestRunReceiver(t *testing.T) {
-	srv := RunServer()
+	srv := RunTestServer()
 	defer srv.Shutdown()
 
 	receiver, _ := NewReceiver(nop)
@@ -76,7 +76,7 @@ func TestRunReceiver(t *testing.T) {
 }
 
 func TestAnnouncer(t *testing.T) {
-	srv := RunServer()
+	srv := RunTestServer()
 	defer srv.Shutdown()
 
 	receiver, _ := NewReceiver(nop)
@@ -100,7 +100,7 @@ func TestAnnouncer(t *testing.T) {
 }
 
 func TestWorkload(t *testing.T) {
-	srv := RunServer()
+	srv := RunTestServer()
 	defer srv.Shutdown()
 
 	ws := new(workloads)
@@ -135,7 +135,7 @@ func TestWorkload(t *testing.T) {
 }
 
 func TestDoubleShutdown(t *testing.T) {
-	srv := RunServer()
+	srv := RunTestServer()
 	defer srv.Shutdown()
 
 	receiver, err := NewReceiver(nop)

@@ -3,6 +3,7 @@ package dispatcher
 import (
 	"fmt"
 	"github.com/nats-io/nats.go"
+	"github.com/rs/zerolog/log"
 	"time"
 )
 
@@ -40,6 +41,8 @@ type Announcer struct {
 	nc      *nats.Conn
 	opts    *announcementsOptions
 	address string
+	msg     []byte
+	done    chan bool
 }
 
 // NewAnnouncer creates new Announcer instance.
@@ -57,11 +60,56 @@ func NewAnnouncer(nc *nats.Conn, opts ...AnnouncementsOption) (*Announcer, error
 	if options.period <= 0 {
 		options.period = DefaultPeriod
 	}
-	return &Announcer{
+	address := nats.NewInbox()
+	a := &Announcer{
 		nc:      nc,
 		opts:    options,
-		address: nats.NewInbox(),
-	}, nil
+		address: address,
+		// The communication protocol is extremely simple.
+		// The announcer publishes its address as string.
+		msg:  []byte(address),
+		done: make(chan bool),
+	}
+	go a.loop()
+	return a, nil
+}
+
+// Address is the address being announced.
+func (a *Announcer) Address() string {
+	return a.address
+}
+
+// Stop gracefully stops internal routines and cleans up resources.
+func (a *Announcer) Stop() {
+	a.done <- true
+}
+
+// announce implements communication protocol and encoding.
+func (a *Announcer) announce() error {
+	return a.nc.Publish(a.opts.subject, a.msg)
+}
+
+// loop is announcing routine skeleton.
+func (a *Announcer) loop() {
+	var err error
+	// Run once immediately
+	err = a.announce()
+	if err != nil {
+		log.Err(err).Msg("error occurred when publishing announcement")
+	}
+	ticker := time.NewTicker(a.opts.period)
+	for {
+		select {
+		case <-ticker.C:
+			err = a.announce()
+			if err != nil {
+				log.Err(err).Msg("error occurred when publishing announcement")
+			}
+		case <-a.done:
+			ticker.Stop()
+			return
+		}
+	}
 }
 
 // Observer represents the entity keeping track of announced consumers' addresses.
@@ -69,6 +117,7 @@ type Observer struct {
 	nc        *nats.Conn
 	opts      *announcementsOptions
 	consumers *Consumers
+	sub       *nats.Subscription
 }
 
 // NewObserver creates new Observer instance.
@@ -86,9 +135,33 @@ func NewObserver(nc *nats.Conn, opts ...AnnouncementsOption) (*Observer, error) 
 	if options.period <= 0 {
 		options.period = DefaultPeriod
 	}
-	return &Observer{
+	o := &Observer{
 		nc:        nc,
 		opts:      options,
 		consumers: NewConsumers(WithTTL(options.period)),
-	}, nil
+	}
+	var err error
+	o.sub, err = o.nc.Subscribe(o.opts.subject, o.process)
+	if err != nil {
+		return nil, fmt.Errorf("cannot subscribe to announcements: %v", err)
+	}
+	return o, nil
+}
+
+// Consumers returns list of active consumers' addresses.
+func (o *Observer) Consumers() []string {
+	return o.consumers.List()
+}
+
+// Stop gracefully stops internal routines and cleans up resources.
+func (o *Observer) Stop() error {
+	if err := o.sub.Unsubscribe(); err != nil {
+		return fmt.Errorf("cannot unsubscribe from announcements: %v", err)
+	}
+	return nil
+}
+
+// process implements communication protocol, encoding, and domain processing.
+func (o *Observer) process(msg *nats.Msg) {
+	o.consumers.Join(string(msg.Data))
 }

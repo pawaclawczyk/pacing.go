@@ -19,7 +19,7 @@ func ConsumerNameCallback(consumers []string) map[string]interface{} {
 }
 
 func TestNewDispatcher(t *testing.T) {
-	srv := RunServer()
+	srv := RunTestServer()
 	defer srv.Shutdown()
 
 	dispatcher, err := NewDispatcher(ConsumerNameCallback)
@@ -33,7 +33,7 @@ func TestNewDispatcher(t *testing.T) {
 }
 
 func TestWatchAnnouncements(t *testing.T) {
-	srv := RunServer()
+	srv := RunTestServer()
 	defer srv.Shutdown()
 
 	dispatcher, err := NewDispatcher(ConsumerNameCallback)
@@ -70,7 +70,7 @@ func TestWatchAnnouncements(t *testing.T) {
 }
 
 func TestDispatchWorkload(t *testing.T) {
-	srv := RunServer()
+	srv := RunTestServer()
 	defer srv.Shutdown()
 
 	dispatcher, _ := NewDispatcher(ConsumerNameCallback)
