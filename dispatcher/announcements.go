@@ -125,6 +125,9 @@ type Observer struct {
 
 // NewObserver creates new Observer instance.
 func NewObserver(nc *nats.Conn, opts ...AnnouncementsOption) (*Observer, error) {
+	if nc == nil {
+		return nil, fmt.Errorf("NATS connection is required argument")
+	}
 	if !nc.IsConnected() {
 		return nil, fmt.Errorf("NATS connection has invalid state: %v", nc.Status())
 	}

@@ -114,6 +114,109 @@ func TestNewAnnouncer(t *testing.T) {
 	}
 }
 
+func TestAnnounce(t *testing.T) {
+	srv := RunTestServer()
+	defer srv.Shutdown()
+	nc := MakeTestConnection(t)
+	defer nc.Close()
+	testNC := MakeTestConnection(t)
+	defer testNC.Close()
+
+	a, err := NewAnnouncer(nc, WithPeriod(time.Hour))
+	assert.NoError(t, err)
+	// Turn off automatic message sending
+	a.Stop()
+
+	sub, err := testNC.SubscribeSync(a.opts.subject)
+	assert.NoError(t, err)
+
+	// Read the first message if any
+	_, _ = sub.NextMsg(2 * time.Millisecond)
+
+	err = a.announce()
+	msg, err := sub.NextMsg(2 * time.Millisecond)
+	assert.NoError(t, err)
+	// As for now the protocol is naively simple and the message does not change over time.
+	assert.Equal(t, a.msg, msg.Data)
+}
+
+func TestNewObserver(t *testing.T) {
+	srv := RunTestServer()
+	defer srv.Shutdown()
+	nc := MakeTestConnection(t)
+	defer nc.Close()
+	broken := MakeTestConnection(t)
+	broken.Close()
+	assert.False(t, broken.IsConnected())
+
+	type args struct {
+		nc   *nats.Conn
+		opts []AnnouncementsOption
+	}
+	type want struct {
+		subject string
+		period  time.Duration
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    want
+		wantErr bool
+	}{
+		{"defaults", args{nc, nil}, want{DefaultSubject, DefaultPeriod}, false},
+		{"no connection", args{nil, nil}, want{}, true},
+		{"broken connection", args{broken, nil}, want{}, true},
+		{"custom subject", args{nc, []AnnouncementsOption{WithSubject("test-subject")}}, want{"test-subject", DefaultPeriod}, false},
+		{"invalid subject (empty)", args{nc, []AnnouncementsOption{WithSubject("")}}, want{DefaultSubject, DefaultPeriod}, false},
+		{"custom period", args{nc, []AnnouncementsOption{WithPeriod(time.Second)}}, want{DefaultSubject, time.Second}, false},
+		{"invalid period (zero)", args{nc, []AnnouncementsOption{WithPeriod(0)}}, want{DefaultSubject, DefaultPeriod}, false},
+		{"invalid period (negative)", args{nc, []AnnouncementsOption{WithPeriod(-time.Second)}}, want{DefaultSubject, DefaultPeriod}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NewObserver(tt.args.nc, tt.args.opts...)
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Nil(t, got)
+			} else {
+				// Test internal properties.
+				assert.True(t, got.nc.IsConnected())
+				assert.Equal(t, tt.want.subject, got.opts.subject)
+				assert.Equal(t, tt.want.period, got.opts.period)
+				assert.NotNil(t, got.consumers)
+				assert.NotNil(t, got.sub)
+				assert.True(t, got.sub.IsValid())
+				// Test methods.
+				assert.Empty(t, got.Consumers())
+			}
+		})
+	}
+}
+
+func TestProcess(t *testing.T) {
+	srv := RunTestServer()
+	defer srv.Shutdown()
+	nc := MakeTestConnection(t)
+	defer nc.Close()
+	testNC := MakeTestConnection(t)
+	defer testNC.Close()
+
+	o, err := NewObserver(nc, WithPeriod(time.Hour))
+	assert.NoError(t, err)
+	defer func() {
+		assert.NoError(t, o.Stop())
+	}()
+
+	// As for now the protocol is naively simple and the message does not change over time.
+	err = testNC.Publish(o.opts.subject, []byte("test-address"))
+	assert.NoError(t, err)
+
+	// Delay
+	time.Sleep(2 * time.Millisecond)
+
+	assert.Equal(t, []string{"test-address"}, o.Consumers())
+}
+
 func TestIntegrationBetweenAnnouncersAndObserver(t *testing.T) {
 	var alice *Observer
 	var bob, charlie *Announcer
