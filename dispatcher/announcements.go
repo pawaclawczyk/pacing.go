@@ -47,6 +47,9 @@ type Announcer struct {
 
 // NewAnnouncer creates new Announcer instance.
 func NewAnnouncer(nc *nats.Conn, opts ...AnnouncementsOption) (*Announcer, error) {
+	if nc == nil {
+		return nil, fmt.Errorf("NATS connection is required argument")
+	}
 	if !nc.IsConnected() {
 		return nil, fmt.Errorf("NATS connection has invalid state: %v", nc.Status())
 	}
